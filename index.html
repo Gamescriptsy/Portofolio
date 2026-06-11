@@ -390,7 +390,9 @@ section{ position:relative; z-index:var(--z-content); }
 
 /* ===== 07. HERO ===== */
 .hero{ min-height:100svh; display:flex; align-items:center; position:relative; overflow:hidden; }
-#hero-canvas{ position:absolute; inset:0; z-index:0; opacity:0.9; }
+/* width/height 100% is required: canvas is a replaced element, so inset:0
+   alone keeps it at its intrinsic 300x150 size */
+#hero-canvas{ position:absolute; inset:0; width:100%; height:100%; z-index:0; opacity:0.9; }
 .hero-grid{
   position:absolute; inset:0; z-index:0; opacity:0.5;
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill='none' stroke='%23e60026' stroke-width='1'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5z'/%3E%3Cpath d='M.5 31.75l13 7.5v15l-13 7.5-13-7.5v-15l13-7.5zM27.5 31.75l13 7.5v15l-13 7.5-13-7.5v-15l13-7.5zM13.99-.75l13 7.5v15l-13 7.5-13-7.5v-15l13-7.5z'/%3E%3C/g%3E%3C/svg%3E");
@@ -648,6 +650,7 @@ a.contact-item:hover{ border-color:var(--red); background:rgba(230,0,38,0.08); b
   .nav-links{ display:none; }
   .nav-toggle{ display:flex; }
   .hud-frame, .hud-status{ display:none; }
+  #hero-canvas{ opacity:0.5; } /* globe sits behind the text on mobile — dim it for readability */
   .pad{ padding:5rem 1.5rem; }
   .hero .container{ padding:0 1.5rem; }
   .about-grid, .skills-grid, .proj-grid, .contact-grid{ grid-template-columns:1fr; }
@@ -1436,11 +1439,22 @@ a.contact-item:hover{ border-color:var(--red); background:rgba(230,0,38,0.08); b
   /* ---------- 12. FOOTER YEAR ---------- */
   $('#year').textContent = new Date().getFullYear();
 
-  /* ---------- 07. THREE.JS HERO SCENE ---------- */
+  /* ---------- 07. THREE.JS HERO SCENE — "CYBER DEFENSE CORE" ----------
+     Composition (everything anchored to one group, offset right on desktop):
+     • Nucleus       — pulsing wireframe core (the protected asset)
+     • Network globe — nodes on a fibonacci sphere, linked to near neighbours
+                       (reads as a global threat-intel map)
+     • Data packets  — glowing dots travelling hop-by-hop along the links
+     • Threat blips  — random nodes flash bright (intrusion detected)
+     • Shield shell  — outer icosahedron wireframe (defense perimeter)
+     • Radar rig     — tilted orbit rings + fast sweep beam with fading tail
+     • Pulse ring    — expanding radar "ping" echo
+     • Dust          — ambient red/cyan particle field
+  */
   (function three(){
     var canvas=$('#hero-canvas');
     if(!canvas || typeof THREE==='undefined'){ if(canvas) canvas.style.display='none'; return; }
-    var scene, camera, renderer, ico, icoInner, particles, raf=null, running=false;
+    var scene, camera, renderer, raf=null, running=false;
     var mouse={x:0,y:0}, target={x:0,y:0};
     var w=canvas.clientWidth, h=canvas.clientHeight;
 
@@ -1451,40 +1465,178 @@ a.contact-item:hover{ border-color:var(--red); background:rgba(230,0,38,0.08); b
       renderer.setPixelRatio(Math.min(window.devicePixelRatio,2));
       renderer.setSize(w,h,false);
 
-      // Wireframe icosahedron
-      var geo=new THREE.IcosahedronGeometry(11, 1);
-      var wire=new THREE.WireframeGeometry(geo);
-      ico=new THREE.LineSegments(wire, new THREE.LineBasicMaterial({color:0xe60026, transparent:true, opacity:0.85}));
-      ico.position.x = w>900 ? 11 : 0;
-      scene.add(ico);
+      var MOBILE=window.innerWidth<768;
+      var core=new THREE.Group();
+      core.position.x = w>900 ? 11 : 0;
+      core.rotation.z = 0.12;
+      if(MOBILE) core.scale.setScalar(0.8);
+      scene.add(core);
 
-      // Inner faint solid core
-      icoInner=new THREE.Mesh(new THREE.IcosahedronGeometry(6.5,0), new THREE.MeshBasicMaterial({color:0x8a0018, transparent:true, opacity:0.12, wireframe:true}));
-      icoInner.position.copy(ico.position); scene.add(icoInner);
+      /* Nucleus — protected asset at the center */
+      var nucleus=new THREE.Mesh(
+        new THREE.IcosahedronGeometry(2.4,1),
+        new THREE.MeshBasicMaterial({color:0xff1a40, wireframe:true, transparent:true, opacity:0.55})
+      );
+      core.add(nucleus);
 
-      // Particle field
-      var COUNT = (window.innerWidth<768||REDUCED) ? 450 : 1200;
+      /* Network globe — fibonacci-sphere nodes (vertex colors so blips can flash) */
+      var R=8, NODE_N=MOBILE?90:160, GOLD=Math.PI*(3-Math.sqrt(5));
+      var BASE_R=0.92, BASE_G=0.04, BASE_B=0.18;
+      var nodes=[], i, j;
+      for(i=0;i<NODE_N;i++){
+        var ny=1-(i/(NODE_N-1))*2, nr=Math.sqrt(Math.max(0,1-ny*ny)), na=GOLD*i;
+        nodes.push(new THREE.Vector3(Math.cos(na)*nr*R, ny*R, Math.sin(na)*nr*R));
+      }
+      var nPos=new Float32Array(NODE_N*3), nCol=new Float32Array(NODE_N*3);
+      for(i=0;i<NODE_N;i++){
+        nPos[i*3]=nodes[i].x; nPos[i*3+1]=nodes[i].y; nPos[i*3+2]=nodes[i].z;
+        nCol[i*3]=BASE_R; nCol[i*3+1]=BASE_G; nCol[i*3+2]=BASE_B;
+      }
+      var nGeo=new THREE.BufferGeometry();
+      nGeo.setAttribute('position', new THREE.BufferAttribute(nPos,3));
+      nGeo.setAttribute('color', new THREE.BufferAttribute(nCol,3));
+      var nodePts=new THREE.Points(nGeo, new THREE.PointsMaterial({size:0.34, vertexColors:true, transparent:true, opacity:0.95}));
+      core.add(nodePts);
+
+      /* Links between near neighbours + adjacency list for packet routing */
+      var edges=[], adj=[], MAXD=MOBILE?3.6:2.95;
+      for(i=0;i<NODE_N;i++) adj.push([]);
+      for(i=0;i<NODE_N;i++){
+        for(j=i+1;j<NODE_N;j++){
+          if(nodes[i].distanceTo(nodes[j])<MAXD){
+            adj[i].push(edges.length); adj[j].push(edges.length);
+            edges.push([i,j]);
+          }
+        }
+      }
+      var ePos=new Float32Array(edges.length*6);
+      for(i=0;i<edges.length;i++){
+        var ea=nodes[edges[i][0]], eb=nodes[edges[i][1]];
+        ePos[i*6]=ea.x; ePos[i*6+1]=ea.y; ePos[i*6+2]=ea.z;
+        ePos[i*6+3]=eb.x; ePos[i*6+4]=eb.y; ePos[i*6+5]=eb.z;
+      }
+      var eGeo=new THREE.BufferGeometry();
+      eGeo.setAttribute('position', new THREE.BufferAttribute(ePos,3));
+      core.add(new THREE.LineSegments(eGeo, new THREE.LineBasicMaterial({color:0xe60026, transparent:true, opacity:0.22})));
+
+      /* Data packets — travel hop-by-hop along the links */
+      var PKT_N=MOBILE?10:24, pkts=[];
+      for(i=0;i<PKT_N;i++){
+        var pe=(Math.random()*edges.length)|0;
+        pkts.push({e:pe, from:edges[pe][0], t:Math.random(), v:0.008+Math.random()*0.014});
+      }
+      var pPos=new Float32Array(PKT_N*3);
+      var pGeo=new THREE.BufferGeometry();
+      pGeo.setAttribute('position', new THREE.BufferAttribute(pPos,3));
+      var pktPts=new THREE.Points(pGeo, new THREE.PointsMaterial({color:0xff5d75, size:0.55, transparent:true, opacity:0.95, blending:THREE.AdditiveBlending, depthWrite:false}));
+      core.add(pktPts);
+      function hopPacket(p){ // arrive at far node, depart on one of its links
+        var e=edges[p.e], to=(e[0]===p.from)?e[1]:e[0], nx=adj[to];
+        p.from=to; p.t=0;
+        p.e=nx.length ? nx[(Math.random()*nx.length)|0] : (Math.random()*edges.length)|0;
+      }
+
+      /* Shield shell — outer defense perimeter */
+      var shell=new THREE.LineSegments(
+        new THREE.WireframeGeometry(new THREE.IcosahedronGeometry(11.6,1)),
+        new THREE.LineBasicMaterial({color:0xe60026, transparent:true, opacity:0.16})
+      );
+      core.add(shell);
+
+      /* Orbit rings + radar sweep */
+      function ringLine(radius,color,opacity){
+        var pts=[], s;
+        for(s=0;s<=120;s++){ var t2=s/120*Math.PI*2; pts.push(new THREE.Vector3(Math.cos(t2)*radius,0,Math.sin(t2)*radius)); }
+        return new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({color:color, transparent:true, opacity:opacity}));
+      }
+      var radar=new THREE.Group(); radar.rotation.x=Math.PI/2.15; core.add(radar);
+      radar.add(ringLine(13.4,0xe60026,0.35));
+      // sweep beam: short arc whose vertex colors fade to black = glowing tail
+      var SW=46, sPos=new Float32Array(SW*3), sCol=new Float32Array(SW*3);
+      for(i=0;i<SW;i++){
+        var sa=-i*0.028, sf=1-i/SW;
+        sPos[i*3]=Math.cos(sa)*13.4; sPos[i*3+1]=0; sPos[i*3+2]=Math.sin(sa)*13.4;
+        sCol[i*3]=sf; sCol[i*3+1]=0.25*sf; sCol[i*3+2]=0.35*sf;
+      }
+      var sGeo=new THREE.BufferGeometry();
+      sGeo.setAttribute('position', new THREE.BufferAttribute(sPos,3));
+      sGeo.setAttribute('color', new THREE.BufferAttribute(sCol,3));
+      var sweep=new THREE.Line(sGeo, new THREE.LineBasicMaterial({vertexColors:true, transparent:true, opacity:0.95, blending:THREE.AdditiveBlending, depthWrite:false}));
+      radar.add(sweep);
+      var ring2=ringLine(15.0,0xe60026,0.14); ring2.rotation.set(Math.PI/3,0,0.7);  core.add(ring2);
+      var ring3=ringLine(12.6,0x00e5ff,0.12); ring3.rotation.set(1.9,0.4,-0.5);     core.add(ring3);
+
+      /* Pulse ring — expanding "ping" echo in the radar plane */
+      var pulse=ringLine(R*1.02,0xff1a40,0); pulse.rotation.x=Math.PI/2.15; core.add(pulse);
+      var pulseT=Math.random();
+
+      /* Ambient dust */
+      var COUNT=(MOBILE||REDUCED)?450:1200;
       var pg=new THREE.BufferGeometry(), pos=new Float32Array(COUNT*3);
-      for(var i=0;i<COUNT*3;i++){ pos[i]=(Math.random()-0.5)*90; }
+      for(i=0;i<COUNT*3;i++){ pos[i]=(Math.random()-0.5)*90; }
       pg.setAttribute('position', new THREE.BufferAttribute(pos,3));
-      particles=new THREE.Points(pg, new THREE.PointsMaterial({color:0xe60026, size:0.18, transparent:true, opacity:0.6}));
+      var particles=new THREE.Points(pg, new THREE.PointsMaterial({color:0xe60026, size:0.18, transparent:true, opacity:0.6}));
       scene.add(particles);
-
-      // subtle second color particles (cyan accent)
       var pg2=new THREE.BufferGeometry(), pos2=new Float32Array(120*3);
-      for(var k=0;k<120*3;k++){ pos2[k]=(Math.random()-0.5)*80; }
+      for(i=0;i<120*3;i++){ pos2[i]=(Math.random()-0.5)*80; }
       pg2.setAttribute('position', new THREE.BufferAttribute(pos2,3));
       var p2=new THREE.Points(pg2, new THREE.PointsMaterial({color:0x00e5ff, size:0.14, transparent:true, opacity:0.35}));
       scene.add(p2);
 
       window.addEventListener('mousemove', function(e){ mouse.x=(e.clientX/window.innerWidth-0.5); mouse.y=(e.clientY/window.innerHeight-0.5); });
 
+      /* Threat blips — random nodes flash bright then decay */
+      var blips=[], blipCd=1.2;
+
+      var tt=0;
       function render(){
+        var spin=REDUCED?0:1, k;
+        tt+=0.016*spin;
         target.x+=(mouse.x-target.x)*0.05; target.y+=(mouse.y-target.y)*0.05;
-        var spin = REDUCED?0:1;
-        ico.rotation.x+=0.0016*spin; ico.rotation.y+=0.0022*spin;
-        icoInner.rotation.x-=0.0022*spin; icoInner.rotation.y-=0.0016*spin;
-        particles.rotation.y+=0.0004*spin; p2.rotation.y-=0.0006*spin;
+
+        core.rotation.y += 0.0016*spin;
+        shell.rotation.y -= 0.0011*spin; shell.rotation.x += 0.0005*spin;
+        ring2.rotation.z += 0.0009*spin;
+        ring3.rotation.x += 0.0007*spin;
+        sweep.rotation.y -= 0.025*spin;
+        nucleus.rotation.x += 0.004*spin; nucleus.rotation.y += 0.005*spin;
+        nucleus.scale.setScalar(1+Math.sin(tt*2.4)*0.07);
+        particles.rotation.y += 0.0004*spin; p2.rotation.y -= 0.0006*spin;
+
+        // packets
+        for(k=0;k<PKT_N;k++){
+          var p=pkts[k], pedge=edges[p.e];
+          var pa=nodes[p.from], pb=nodes[(pedge[0]===p.from)?pedge[1]:pedge[0]];
+          p.t+=p.v*spin; if(p.t>=1) { hopPacket(p); pa=nodes[p.from]; pb=nodes[(edges[p.e][0]===p.from)?edges[p.e][1]:edges[p.e][0]]; }
+          pPos[k*3]  =pa.x+(pb.x-pa.x)*p.t;
+          pPos[k*3+1]=pa.y+(pb.y-pa.y)*p.t;
+          pPos[k*3+2]=pa.z+(pb.z-pa.z)*p.t;
+        }
+        pGeo.attributes.position.needsUpdate=true;
+
+        // threat blips
+        if(spin){
+          blipCd-=0.016;
+          if(blipCd<=0){ blips.push({i:(Math.random()*NODE_N)|0, life:1}); blipCd=0.5+Math.random()*1.6; }
+          for(k=blips.length-1;k>=0;k--){
+            var bl=blips[k], i3=bl.i*3;
+            bl.life-=0.022;
+            if(bl.life<=0){ nCol[i3]=BASE_R; nCol[i3+1]=BASE_G; nCol[i3+2]=BASE_B; blips.splice(k,1); }
+            else{
+              nCol[i3]  =BASE_R+(1.0-BASE_R)*bl.life;
+              nCol[i3+1]=BASE_G+(0.85-BASE_G)*bl.life;
+              nCol[i3+2]=BASE_B+(0.92-BASE_B)*bl.life;
+            }
+          }
+          nGeo.attributes.color.needsUpdate=true;
+        }
+
+        // pulse ring
+        pulseT=(pulseT+0.006*spin)%1;
+        var ps=1+pulseT*0.85;
+        pulse.scale.set(ps,1,ps);
+        pulse.material.opacity=(1-pulseT)*0.4;
+
         camera.position.x += (target.x*8 - camera.position.x)*0.05;
         camera.position.y += (-target.y*8 - camera.position.y)*0.05;
         camera.lookAt(scene.position);
@@ -1497,7 +1649,7 @@ a.contact-item:hover{ border-color:var(--red); background:rgba(230,0,38,0.08); b
       function resize(){
         w=canvas.clientWidth; h=canvas.clientHeight;
         camera.aspect=w/h; camera.updateProjectionMatrix(); renderer.setSize(w,h,false);
-        ico.position.x = w>900 ? 11 : 0; icoInner.position.x=ico.position.x;
+        core.position.x = w>900 ? 11 : 0;
       }
       window.addEventListener('resize', resize);
 
